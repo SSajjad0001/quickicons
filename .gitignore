@@ -1,5 +1,9 @@
 node_modules
 out
-*.vsix
+*.zip
 .DS_Store
 *.log
+
+# Keep older local builds untracked; commit only the latest release VSIX below
+*.vsix
+!quickicons-1.0.3.vsix

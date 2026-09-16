@@ -2,7 +2,7 @@
   "name": "quickicons",
   "displayName": "QuickIcons",
   "description": "Quickly preview SVG and image icons from any folder in Explorer.",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "publisher": "unified",
   "engines": {
     "vscode": "^1.74.0"
@@ -35,6 +35,7 @@
           "visibility": "collapsed"
         },
         {
+          "type": "webview",
           "id": "quickicons.icons",
           "name": "Icons",
           "visibility": "visible"
@@ -110,6 +111,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "quickicons.searchIcons",
+        "title": "QuickIcons: Search Icons",
+        "icon": "$(search)"
+      },
+      {
         "command": "quickicons.browseFolder",
         "title": "QuickIcons: Browse Icons Here"
       },
@@ -125,16 +131,14 @@
     "menus": {
       "view/title": [
         {
+          "command": "quickicons.searchIcons",
+          "when": "view == quickicons.icons",
+          "group": "navigation@1"
+        },
+        {
           "command": "quickicons.refreshIcons",
           "when": "view == quickicons.icons",
-          "group": "navigation"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "quickicons.openIcon",
-          "when": "view == quickicons.icons && viewItem == quickicons.icon",
-          "group": "inline"
+          "group": "navigation@2"
         }
       ],
       "explorer/context": [

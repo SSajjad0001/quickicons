@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 import { IconHoverProvider } from "./hoverProvider";
-import { IconsTreeProvider } from "./iconsTree";
+import { IconsBrowserViewProvider } from "./iconsBrowser";
 import { isImageUri, isSvgUri, readConfig } from "./mediaUtils";
 import { PreviewViewProvider } from "./previewView";
 
@@ -15,15 +15,12 @@ async function resolveExplorerTarget(uri?: vscode.Uri): Promise<vscode.Uri | und
     return uri;
   }
 
-  // Keybinding: read the focused Explorer resource via copyFilePath
   const previous = await vscode.env.clipboard.readText();
   try {
     await vscode.commands.executeCommand("copyFilePath");
     const copied = (await vscode.env.clipboard.readText()).trim();
-    // Restore clipboard (best-effort)
     await vscode.env.clipboard.writeText(previous);
 
-    // copyFilePath may return multiple lines when multi-select
     const first = copied.split(/\r?\n/).map((s) => s.trim()).find(Boolean);
     if (first && fs.existsSync(first)) {
       return vscode.Uri.file(first);
@@ -59,13 +56,11 @@ export function activate(context: vscode.ExtensionContext): void {
   try {
     const hoverProvider = new IconHoverProvider();
     const previewProvider = new PreviewViewProvider();
-    const iconsTree = new IconsTreeProvider();
+    const iconsBrowser = new IconsBrowserViewProvider();
 
-    const treeView = vscode.window.createTreeView("quickicons.icons", {
-      treeDataProvider: iconsTree,
-      showCollapseAll: false,
+    iconsBrowser.setPickHandler((uri) => {
+      previewProvider.showUri(uri);
     });
-    iconsTree.bindTreeView(treeView);
 
     context.subscriptions.push(
       vscode.languages.registerHoverProvider({ scheme: "file" }, hoverProvider),
@@ -73,20 +68,12 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.registerWebviewViewProvider(PreviewViewProvider.viewId, previewProvider, {
         webviewOptions: { retainContextWhenHidden: true },
       }),
-      treeView,
-      iconsTree
+      vscode.window.registerWebviewViewProvider(IconsBrowserViewProvider.viewId, iconsBrowser, {
+        webviewOptions: { retainContextWhenHidden: true },
+      }),
+      iconsBrowser
     );
 
-    context.subscriptions.push(
-      treeView.onDidChangeSelection((e) => {
-        const node = e.selection[0];
-        if (node) {
-          previewProvider.showUri(node.uri);
-        }
-      })
-    );
-
-    // Only update the side preview when an image is opened — do NOT replace the Icons list folder
     const syncFromEditor = (editor: vscode.TextEditor | undefined) => {
       const cfg = readConfig();
       if (!cfg.enabled || !cfg.autoPreview) {
@@ -104,9 +91,9 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!isImageUri(doc.uri)) {
           return;
         }
-        const folder = iconsTree.currentFolder?.fsPath;
+        const folder = iconsBrowser.currentFolder?.fsPath;
         if (folder && doc.uri.fsPath.startsWith(folder)) {
-          iconsTree.refresh();
+          iconsBrowser.refresh();
         }
         if (vscode.window.activeTextEditor?.document.uri.fsPath === doc.uri.fsPath) {
           previewProvider.showUri(doc.uri);
@@ -127,7 +114,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }),
       vscode.commands.registerCommand("quickicons.showStatus", () => {
         vscode.window.showInformationMessage(
-          "QuickIcons: Explorer → “Icons”, hover rows to preview SVG/PNG/JPG/…"
+          "QuickIcons: browse a folder, then use the search box under Icons to filter by filename."
         );
       }),
       vscode.commands.registerCommand("quickicons.pickIcon", (uri: vscode.Uri) => {
@@ -145,7 +132,11 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.commands.executeCommand("quickicons.preview.focus");
       }),
       vscode.commands.registerCommand("quickicons.refreshIcons", () => {
-        iconsTree.refresh();
+        iconsBrowser.refresh();
+      }),
+      vscode.commands.registerCommand("quickicons.searchIcons", async () => {
+        await vscode.commands.executeCommand("quickicons.icons.focus");
+        iconsBrowser.focusSearch();
       }),
       vscode.commands.registerCommand(
         "quickicons.browseFolder",
@@ -158,12 +149,11 @@ export function activate(context: vscode.ExtensionContext): void {
             return;
           }
           const folder = toBrowseFolder(target);
-          iconsTree.setFolder(folder);
+          iconsBrowser.setFolder(folder);
           await vscode.commands.executeCommand("quickicons.icons.focus");
-          // Force a children refresh so the count message updates immediately
-          iconsTree.refresh();
+          iconsBrowser.focusSearch();
           vscode.window.setStatusBarMessage(
-            `QuickIcons: ${path.basename(folder.fsPath)} — all SVG/PNG/JPEG/… listed in Icons`,
+            `QuickIcons: ${path.basename(folder.fsPath)} — search under Icons (2+ chars)`,
             4000
           );
         }
@@ -172,12 +162,10 @@ export function activate(context: vscode.ExtensionContext): void {
         "quickicons.openIcon",
         async (node?: { uri?: vscode.Uri } | vscode.Uri) => {
           const target =
-            (node && "fsPath" in node ? node : node && "uri" in node ? node.uri : undefined) ??
-            treeView.selection[0]?.uri;
+            node && "fsPath" in node ? node : node && "uri" in node ? node.uri : undefined;
           if (!target) {
             return;
           }
-          // Text SVGs; use default open for raster images
           if (isSvgUri(target)) {
             await vscode.window.showTextDocument(target, { preview: true, preserveFocus: true });
           } else {

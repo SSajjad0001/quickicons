@@ -10,9 +10,9 @@ Supports **SVG**, **PNG**, **JPG**, **JPEG**, **GIF**, **WebP**, **ICO**, **BMP*
 2. Start the preview flow in either way:
    - Press **Shift+Q**, then **I**
    - Or right‑click the folder → **QuickIcons: Browse Icons Here**
-3. The **Icons** view opens in the Explorer sidebar and lists **every** icon in that folder (and subfolders): SVG, PNG, JPG, JPEG, GIF, WebP, ICO, BMP, AVIF — including the same name in multiple formats as separate rows (for example `users.svg` and `users.png`).
-4. Move across the list to see each file’s preview in a small popup next to the item.
-5. Click an item to show it in the **Icon Preview** panel, or open the file when you need the source.
+3. The **Icons** view opens under Explorer with a **search box** at the top.
+4. Type at least **2 characters** of a filename (for example `sf` or `sfs.svg`) — the list filters as you type.
+5. Move across matches to update **Icon Preview**, or click a row to focus that icon.
 
 That is the full loop: pick a folder → open the icon list → skim previews → open only what you need.
 

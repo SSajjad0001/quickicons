@@ -6,4 +6,4 @@ out
 
 # Keep older local builds untracked; commit only the latest release VSIX below
 *.vsix
-!quickicons-1.0.3.vsix
+!quickicons-1.0.9.vsix

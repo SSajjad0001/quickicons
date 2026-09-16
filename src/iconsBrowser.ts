@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 import {
@@ -5,8 +6,14 @@ import {
   readConfig,
   type ImageEntry,
 } from "./mediaUtils";
+import {
+  buildSvgFingerprint,
+  scoreSvgSimilarity,
+  type SvgFingerprint,
+} from "./svgMatch";
 
 const MIN_QUERY_LEN = 2;
+const MIN_SVG_SCORE = 0.18;
 
 type IconPayload = {
   path: string;
@@ -18,6 +25,7 @@ type IconPayload = {
   format: string;
   /** Webview-safe URI for the real icon thumbnail */
   thumb: string;
+  score?: number;
 };
 
 /**
@@ -29,6 +37,7 @@ export class IconsBrowserViewProvider implements vscode.WebviewViewProvider, vsc
   private view?: vscode.WebviewView;
   private folder?: vscode.Uri;
   private allIcons: IconPayload[] = [];
+  private svgFingerprints = new Map<string, SvgFingerprint>();
   private query = "";
   private readonly disposables: vscode.Disposable[] = [];
   private onPick?: (uri: vscode.Uri) => void;
@@ -60,10 +69,20 @@ export class IconsBrowserViewProvider implements vscode.WebviewViewProvider, vsc
     this.applyResourceRoots();
 
     webviewView.webview.onDidReceiveMessage(
-      async (msg: { type: string; query?: string; path?: string; text?: string }) => {
+      async (msg: {
+        type: string;
+        query?: string;
+        path?: string;
+        text?: string;
+        svg?: string;
+      }) => {
         if (msg.type === "search") {
           this.query = (msg.query ?? "").trim();
           this.updateDescription();
+          return;
+        }
+        if (msg.type === "svgSearch") {
+          this.runSvgSearch(msg.svg ?? "");
           return;
         }
         if (msg.type === "pick" && msg.path) {
@@ -144,6 +163,7 @@ export class IconsBrowserViewProvider implements vscode.WebviewViewProvider, vsc
   private reloadIcons(): void {
     if (!this.folder) {
       this.allIcons = [];
+      this.svgFingerprints.clear();
       return;
     }
     const cfg = readConfig();
@@ -151,7 +171,78 @@ export class IconsBrowserViewProvider implements vscode.WebviewViewProvider, vsc
       recursive: cfg.recursive,
       maxDepth: cfg.maxDepth,
     });
-    this.allIcons = entries.map((e) => this.toPayload(e));
+    this.svgFingerprints.clear();
+    this.allIcons = entries.map((e) => {
+      const payload = this.toPayload(e);
+      if (e.ext === ".svg") {
+        try {
+          const raw = fs.readFileSync(e.uri.fsPath, "utf8");
+          const fp = buildSvgFingerprint(raw);
+          if (fp) {
+            this.svgFingerprints.set(e.uri.fsPath, fp);
+          }
+        } catch {
+          // ignore unreadable svg
+        }
+      }
+      return payload;
+    });
+  }
+
+  private runSvgSearch(svgText: string): void {
+    if (!this.view) {
+      return;
+    }
+    const trimmed = svgText.trim();
+    if (trimmed.length < 8) {
+      this.view.webview.postMessage({
+        type: "svgResults",
+        total: this.allIcons.length,
+        svgCount: this.svgFingerprints.size,
+        icons: [],
+        queryLen: trimmed.length,
+      });
+      this.view.description = `0/${this.svgFingerprints.size}`;
+      return;
+    }
+
+    const queryFp = buildSvgFingerprint(trimmed);
+    if (!queryFp) {
+      this.view.webview.postMessage({
+        type: "svgResults",
+        total: this.allIcons.length,
+        svgCount: this.svgFingerprints.size,
+        icons: [],
+        error: "Paste valid SVG markup (or a path fragment).",
+      });
+      return;
+    }
+
+    const scored: IconPayload[] = [];
+    for (const icon of this.allIcons) {
+      if (icon.ext !== ".svg") {
+        continue;
+      }
+      const fp = this.svgFingerprints.get(icon.path);
+      if (!fp) {
+        continue;
+      }
+      const score = scoreSvgSimilarity(queryFp, fp);
+      if (score >= MIN_SVG_SCORE) {
+        scored.push({ ...icon, score });
+      }
+    }
+
+    scored.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    const top = scored.slice(0, 200);
+
+    this.view.webview.postMessage({
+      type: "svgResults",
+      total: this.allIcons.length,
+      svgCount: this.svgFingerprints.size,
+      icons: top,
+    });
+    this.view.description = `${top.length}/${this.svgFingerprints.size}`;
   }
 
   private toPayload(entry: ImageEntry): IconPayload {
@@ -229,17 +320,41 @@ export class IconsBrowserViewProvider implements vscode.WebviewViewProvider, vsc
     }
     .wrap { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; }
     .search-row {
-      display: flex; align-items: center; gap: 6px;
+      display: flex; align-items: flex-start; gap: 6px;
       padding: 8px 10px 6px;
       border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-widget-border, transparent));
       position: sticky; top: 0; background: var(--vscode-sideBar-background); z-index: 2;
     }
-    .search-row input {
-      flex: 1; min-width: 0; height: 24px; padding: 0 8px; border-radius: 2px;
+    .search-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    .search-row input[type="search"],
+    .search-row textarea {
+      width: 100%; box-sizing: border-box;
+      padding: 4px 8px; border-radius: 2px;
       border: 1px solid var(--vscode-input-border, transparent);
       background: var(--vscode-input-background); color: var(--vscode-input-foreground); outline: none;
+      font: inherit;
     }
-    .search-row input:focus { border-color: var(--vscode-focusBorder); }
+    .search-row input[type="search"] { height: 24px; }
+    .search-row textarea {
+      min-height: 72px; max-height: 160px; resize: vertical;
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: 11px; line-height: 1.35;
+      display: none;
+    }
+    .search-row.svg-on input[type="search"] { display: none; }
+    .search-row.svg-on textarea { display: block; }
+    .search-row input:focus, .search-row textarea:focus { border-color: var(--vscode-focusBorder); }
+    .svg-toggle {
+      display: flex; align-items: center; gap: 4px;
+      flex-shrink: 0; margin-top: 3px;
+      font-size: 11px; user-select: none; cursor: pointer;
+      opacity: 0.9; white-space: nowrap;
+    }
+    .svg-toggle input { margin: 0; cursor: pointer; }
+    .score {
+      flex-shrink: 0; font-size: 10px; opacity: 0.75;
+      min-width: 34px; text-align: right;
+    }
     .meta { padding: 4px 10px 6px; font-size: 11px; opacity: 0.75; }
     .list { flex: 1; overflow: auto; padding: 0 0 8px; }
     .row {
@@ -366,8 +481,15 @@ export class IconsBrowserViewProvider implements vscode.WebviewViewProvider, vsc
 </head>
 <body>
   <div class="wrap">
-    <div class="search-row">
-      <input id="q" type="search" placeholder="Filter by filename (2+ chars)…" spellcheck="false" autocomplete="off" />
+    <div class="search-row" id="searchRow">
+      <div class="search-fields">
+        <input id="q" type="search" placeholder="Filter by filename (2+ chars)…" spellcheck="false" autocomplete="off" />
+        <textarea id="svgQ" placeholder="Paste SVG code to find similar icons…" spellcheck="false"></textarea>
+      </div>
+      <label class="svg-toggle" title="Search by pasted SVG markup / path similarity">
+        <input type="checkbox" id="svgMode" />
+        <span>SVG</span>
+      </label>
     </div>
     <div id="meta" class="meta"></div>
     <div id="list" class="list"></div>
@@ -383,7 +505,10 @@ export class IconsBrowserViewProvider implements vscode.WebviewViewProvider, vsc
   </div>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
+    const searchRow = document.getElementById('searchRow');
     const input = document.getElementById('q');
+    const svgInput = document.getElementById('svgQ');
+    const svgMode = document.getElementById('svgMode');
     const listEl = document.getElementById('list');
     const metaEl = document.getElementById('meta');
     const hoverModal = document.getElementById('hover-modal');
@@ -392,12 +517,15 @@ export class IconsBrowserViewProvider implements vscode.WebviewViewProvider, vsc
     const ctxMenu = document.getElementById('ctx-menu');
 
     let allIcons = [];
+    let displayIcons = null; // when set (SVG search), render this instead of filename filter
     let folderName = '';
     let activePath = '';
     let minQuery = ${MIN_QUERY_LEN};
     let previewSize = 96;
     let hideTimer;
     let ctxIcon = null;
+    let svgDebounce;
+    let svgCount = 0;
 
     function normalizeQuery(value) {
       return String(value || '').trim().toLowerCase();
@@ -411,6 +539,38 @@ export class IconsBrowserViewProvider implements vscode.WebviewViewProvider, vsc
     function filterIcons(q) {
       if (!q || q.length < minQuery) return allIcons;
       return allIcons.filter((icon) => matchesFileName(icon, q));
+    }
+
+    function isSvgMode() {
+      return !!(svgMode && svgMode.checked);
+    }
+
+    function syncSvgModeUi() {
+      if (!searchRow) return;
+      if (isSvgMode()) {
+        searchRow.classList.add('svg-on');
+        svgInput.focus();
+      } else {
+        searchRow.classList.remove('svg-on');
+        clearTimeout(svgDebounce);
+        displayIcons = null;
+        input.focus();
+        renderFilenameList();
+      }
+    }
+
+    function requestSvgSearch() {
+      if (!isSvgMode()) return;
+      clearTimeout(svgDebounce);
+      svgDebounce = setTimeout(() => {
+        if (!isSvgMode()) return;
+        vscode.postMessage({ type: 'svgSearch', svg: svgInput.value || '' });
+      }, 180);
+    }
+
+    function renderFilenameList() {
+      displayIcons = null;
+      render({ mode: 'filename' });
     }
 
     function escapeHtml(s) {
@@ -547,9 +707,17 @@ export class IconsBrowserViewProvider implements vscode.WebviewViewProvider, vsc
       return wrap;
     }
 
-    function render() {
+    function render(options) {
+      const mode = (options && options.mode)
+        || (isSvgMode() ? 'svg' : 'filename');
+      const fromSvg = mode === 'svg';
       const q = normalizeQuery(input.value);
-      const icons = filterIcons(q);
+
+      // Filename mode always uses the full icon list (all formats)
+      const icons = fromSvg && Array.isArray(displayIcons)
+        ? displayIcons
+        : filterIcons(q);
+
       const total = allIcons.length;
       hideHover();
 
@@ -559,20 +727,36 @@ export class IconsBrowserViewProvider implements vscode.WebviewViewProvider, vsc
         return;
       }
 
-      if (q.length >= minQuery) {
-        metaEl.textContent = icons.length + ' of ' + total + ' icons'
-          + (folderName ? ' in “' + folderName + '”' : '')
-          + ' · “' + input.value.trim() + '”';
+      if (fromSvg) {
+        if (options && options.svgError) {
+          metaEl.textContent = options.svgError;
+        } else if (!svgInput.value.trim()) {
+          metaEl.textContent = (svgCount || 0) + ' SVG icons ready — paste markup to find matches';
+        } else {
+          metaEl.textContent = icons.length + ' similar of ' + (svgCount || 0) + ' SVG'
+            + (folderName ? ' in “' + folderName + '”' : '');
+        }
       } else {
-        metaEl.textContent = total + ' icons'
-          + (folderName ? ' in “' + folderName + '”' : '')
-          + (q ? ' · type ' + minQuery + '+ chars to filter' : '');
+        // Always announce full library size when leaving SVG mode
+        if (q.length >= minQuery) {
+          metaEl.textContent = icons.length + ' of ' + total + ' icons'
+            + (folderName ? ' in “' + folderName + '”' : '')
+            + ' · “' + input.value.trim() + '”';
+        } else {
+          metaEl.textContent = total + ' icons'
+            + (folderName ? ' in “' + folderName + '”' : '')
+            + (q ? ' · type ' + minQuery + '+ chars to filter' : '');
+        }
+        vscode.postMessage({ type: 'search', query: input.value, resetSvg: true });
       }
 
-      vscode.postMessage({ type: 'search', query: input.value });
-
       if (!icons.length) {
-        listEl.innerHTML = '<div class="empty">No filenames match “' + escapeHtml(input.value.trim()) + '”.</div>';
+        const emptyMsg = fromSvg
+          ? (svgInput.value.trim()
+              ? 'No similar SVG icons found.'
+              : 'Paste SVG code to search.')
+          : 'No filenames match “' + escapeHtml(input.value.trim()) + '”.';
+        listEl.innerHTML = '<div class="empty">' + emptyMsg + '</div>';
         return;
       }
 
@@ -583,7 +767,6 @@ export class IconsBrowserViewProvider implements vscode.WebviewViewProvider, vsc
         btn.className = 'row' + (icon.path === activePath ? ' active' : '');
 
         const thumbEl = makeThumb(icon);
-        // Preview modal only when hovering the thumbnail, not the name
         thumbEl.addEventListener('mouseenter', () => {
           showHover(icon, thumbEl);
         });
@@ -592,8 +775,16 @@ export class IconsBrowserViewProvider implements vscode.WebviewViewProvider, vsc
 
         const name = document.createElement('span');
         name.className = 'name';
-        name.innerHTML = highlightName(icon.name, q);
+        name.innerHTML = fromSvg ? escapeHtml(icon.name) : highlightName(icon.name, q);
         btn.appendChild(name);
+
+        if (fromSvg && typeof icon.score === 'number') {
+          const scoreEl = document.createElement('span');
+          scoreEl.className = 'score';
+          scoreEl.textContent = Math.round(icon.score * 100) + '%';
+          scoreEl.title = 'Similarity score';
+          btn.appendChild(scoreEl);
+        }
 
         const format = document.createElement('span');
         format.className = 'format';
@@ -622,24 +813,68 @@ export class IconsBrowserViewProvider implements vscode.WebviewViewProvider, vsc
       hideHover();
       hideContextMenu();
     }, { passive: true });
-    input.addEventListener('input', () => render());
+    input.addEventListener('input', () => {
+      if (!isSvgMode()) renderFilenameList();
+    });
+    svgMode.addEventListener('change', () => {
+      if (isSvgMode()) {
+        searchRow.classList.add('svg-on');
+        clearTimeout(svgDebounce);
+        displayIcons = [];
+        svgInput.focus();
+        render({ mode: 'svg' });
+        if (svgInput.value.trim()) requestSvgSearch();
+      } else {
+        syncSvgModeUi();
+      }
+    });
+    svgInput.addEventListener('input', () => {
+      if (isSvgMode()) requestSvgSearch();
+    });
+    svgInput.addEventListener('paste', () => {
+      if (isSvgMode()) {
+        setTimeout(() => requestSvgSearch(), 0);
+      }
+    });
 
     window.addEventListener('message', (event) => {
       const msg = event.data;
       if (msg.type === 'focusSearch') {
-        input.focus();
-        input.select();
+        if (isSvgMode()) {
+          svgInput.focus();
+          svgInput.select();
+        } else {
+          input.focus();
+          input.select();
+        }
+        return;
+      }
+      if (msg.type === 'svgResults') {
+        // Ignore late SVG results after unchecking
+        if (!isSvgMode()) return;
+        displayIcons = Array.isArray(msg.icons) ? msg.icons : [];
+        if (typeof msg.svgCount === 'number') svgCount = msg.svgCount;
+        render({ mode: 'svg', svgError: msg.error });
         return;
       }
       if (msg.type === 'state') {
         allIcons = Array.isArray(msg.icons) ? msg.icons : [];
         folderName = msg.folderName || '';
+        svgCount = allIcons.filter((i) => i.ext === '.svg').length;
+        displayIcons = null;
         if (typeof msg.minQuery === 'number') minQuery = msg.minQuery;
         if (typeof msg.previewSize === 'number') previewSize = msg.previewSize;
         if (typeof msg.query === 'string' && document.activeElement !== input) {
           input.value = msg.query;
         }
-        render();
+        if (isSvgMode() && svgInput.value.trim()) {
+          requestSvgSearch();
+        } else if (isSvgMode()) {
+          displayIcons = [];
+          render({ mode: 'svg' });
+        } else {
+          renderFilenameList();
+        }
       }
     });
 

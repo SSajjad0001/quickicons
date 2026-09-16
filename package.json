@@ -2,7 +2,7 @@
   "name": "quickicons",
   "displayName": "QuickIcons",
   "description": "Quickly preview SVG and image icons from any folder in Explorer.",
-  "version": "1.0.9",
+  "version": "1.1.1",
   "publisher": "unified",
   "engines": {
     "vscode": "^1.74.0"

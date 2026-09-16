@@ -12,7 +12,8 @@ Supports **SVG**, **PNG**, **JPG**, **JPEG**, **GIF**, **WebP**, **ICO**, **BMP*
    - Or right‑click the folder → **QuickIcons: Browse Icons Here**
 3. The **Icons** view opens under Explorer with a **search box** at the top.
 4. Type at least **2 characters** of a filename (for example `sf` or `sfs.svg`) — the list filters as you type.
-5. Move across matches to update **Icon Preview**, or click a row to focus that icon.
+5. Check **SVG** at the end of the search row, paste SVG markup, and matching / similar SVG icons are listed with a similarity score.
+6. Move across matches to update **Icon Preview**, or click a row to focus that icon.
 
 That is the full loop: pick a folder → open the icon list → skim previews → open only what you need.
 

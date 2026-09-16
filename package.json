@@ -1,0 +1,169 @@
+{
+  "name": "quickicons",
+  "displayName": "QuickIcons",
+  "description": "Quickly preview SVG and image icons from any folder in Explorer.",
+  "version": "1.0.1",
+  "publisher": "unified",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
+  "keywords": [
+    "svg",
+    "icon",
+    "png",
+    "jpg",
+    "webp",
+    "preview",
+    "images",
+    "assets"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "quickicons.preview",
+          "name": "Icon Preview",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "quickicons.icons",
+          "name": "Icons",
+          "visibility": "visible"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "QuickIcons",
+      "properties": {
+        "quickicons.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable QuickIcons previews."
+        },
+        "quickicons.autoPreviewOnOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "When you open an image/SVG, update the Icon Preview panel."
+        },
+        "quickicons.previewSize": {
+          "type": "number",
+          "default": 96,
+          "minimum": 16,
+          "maximum": 512,
+          "description": "Preview size in pixels."
+        },
+        "quickicons.showFileName": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the file name under the preview."
+        },
+        "quickicons.background": {
+          "type": "string",
+          "enum": [
+            "checker",
+            "light",
+            "dark",
+            "transparent"
+          ],
+          "default": "checker",
+          "description": "Background behind SVG previews."
+        },
+        "quickicons.recursive": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include icons from subfolders when browsing a folder."
+        },
+        "quickicons.maxDepth": {
+          "type": "number",
+          "default": 8,
+          "minimum": 1,
+          "maximum": 20,
+          "description": "Max subfolder depth when recursive browsing is enabled."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "quickicons.toggle",
+        "title": "QuickIcons: Toggle Previews"
+      },
+      {
+        "command": "quickicons.showStatus",
+        "title": "QuickIcons: Show Status"
+      },
+      {
+        "command": "quickicons.previewActive",
+        "title": "QuickIcons: Preview Active Icon"
+      },
+      {
+        "command": "quickicons.refreshIcons",
+        "title": "QuickIcons: Refresh Icon List",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "quickicons.browseFolder",
+        "title": "QuickIcons: Browse Icons Here"
+      },
+      {
+        "command": "quickicons.pickIcon",
+        "title": "QuickIcons: Pick Icon"
+      },
+      {
+        "command": "quickicons.openIcon",
+        "title": "QuickIcons: Open File"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "quickicons.refreshIcons",
+          "when": "view == quickicons.icons",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "quickicons.openIcon",
+          "when": "view == quickicons.icons && viewItem == quickicons.icon",
+          "group": "inline"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "quickicons.browseFolder",
+          "when": "explorerResourceIsFolder || resourceExtname =~ /\\.(svg|png|jpe?g|gif|webp|ico|bmp|avif)$/i",
+          "group": "navigation@90"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "quickicons.browseFolder",
+        "key": "shift+q i",
+        "mac": "shift+q i",
+        "when": "filesExplorerFocus"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package --allow-missing-repository --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.74.0",
+    "@vscode/vsce": "^3.2.1",
+    "typescript": "^5.3.3"
+  }
+}
